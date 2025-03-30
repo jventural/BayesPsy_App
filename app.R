@@ -1,7 +1,39 @@
-# Cargar las librerías necesarias
+# Lista de paquetes disponibles en CRAN
+paquetes_cran <- c(
+  "shiny", "shinythemes", "blavaan", "lavaan", "dplyr", 
+  "ggplot2", "readxl", "DT", "openxlsx", "RColorBrewer", 
+  "bibtex", "sessioninfo"
+)
+
+# Identificar los paquetes de CRAN que aún no están instalados
+paquetes_faltantes <- paquetes_cran[!(paquetes_cran %in% installed.packages()[, "Package"])]
+
+# Instalar los paquetes faltantes de CRAN
+if (length(paquetes_faltantes) > 0) {
+  install.packages(paquetes_faltantes, dependencies = TRUE)
+}
+
+# Instalar 'devtools' si no está instalado (necesario para instalar desde GitHub)
+if (!require("devtools", quietly = TRUE)) {
+  install.packages("devtools")
+  library(devtools)
+}
+
+# Instalar condicionalmente PsyMetricTools desde GitHub si no está instalado
+if (!require("PsyMetricTools", quietly = TRUE)) {
+  devtools::install_github("jventural/PsyMetricTools")
+}
+
+# Instalar condicionalmente BayesPsyMetrics desde GitHub si no está instalado
+if (!require("BayesPsyMetrics", quietly = TRUE)) {
+  devtools::install_github("jventural/BayesPsyMetrics")
+}
+
+# Cargar todas las librerías
 library(shiny)
 library(shinythemes)
 library(blavaan)
+library(lavaan)
 library(dplyr)
 library(ggplot2)
 library(readxl)
@@ -12,6 +44,7 @@ library(openxlsx)
 library(RColorBrewer)
 library(bibtex)
 library(sessioninfo)
+
 
 # Generar el archivo de referencias con los paquetes adjuntos y leer el bibtex
 si <- sessioninfo::session_info()
