@@ -1,19 +1,17 @@
+# Cargar las librerías necesarias
 library(shiny)
 library(shinythemes)
-library(readxl)
-library(dplyr)
-library(PsyMetricTools)
 library(blavaan)
-library(lavaan)
-library(BayesPsyMetrics)
-library(openxlsx)
-library(wesanderson)
-library(RColorBrewer)
-library(DT)
+library(dplyr)
 library(ggplot2)
-library(rlang)
-library(sessioninfo)
+library(readxl)
+library(PsyMetricTools)
+library(BayesPsyMetrics)
+library(DT)
+library(openxlsx)
+library(RColorBrewer)
 library(bibtex)
+library(sessioninfo)
 
 # Generar el archivo de referencias con los paquetes adjuntos y leer el bibtex
 si <- sessioninfo::session_info()
@@ -21,382 +19,426 @@ attached_pkgs <- si$packages$package[si$packages$attached]
 bibtex::write.bib(attached_pkgs, file = "references.bib")
 bibs <- bibtex::read.bib("references.bib")
 
-# Se asume que la función convert_bib_to_html() está definida en otro lado o la defines tú.
-# Por ejemplo, podrías definir una versión simple:
+# Función para convertir BibTeX a HTML
 convert_bib_to_html <- function(bibs) {
-  # Convertir cada entrada a texto y unir las líneas
   bib_char <- sapply(bibs, function(x) paste(format(x), collapse = " "))
-  # Reemplazar _texto_ por cursivas (<em>texto</em>)
   bib_html <- gsub("_(.*?)_", "<em>\\1</em>", bib_char)
-  # Reemplazar \texttt{texto} por código (<code>texto</code>)
   bib_html <- gsub("\\\\texttt\\{(.*?)\\}", "<code>\\1</code>", bib_html)
-  # Envolver cada referencia en un párrafo
   bib_html <- paste0("<p>", bib_html, "</p>")
-  # Unir todas las entradas
   paste(bib_html, collapse = "\n")
 }
 
-
+# Definir la interfaz de usuario con 11 pestañas (la última es "How to cite")
 ui <- navbarPage("BayesPsy",
+                 
                  theme = shinytheme("cerulean"),
                  
-                 # 1. Data Upload and Preprocessing
-                 tabPanel("Data Upload and Preprocessing",
+                 # ----- Paso 1: Priors -----
+                 tabPanel("Paso 1: Priors",
                           sidebarLayout(
                             sidebarPanel(
-                              h4("Data Upload and Preprocessing"),
-                              fileInput("archivo", "Select Test File (Excel)", accept = c(".xlsx")),
-                              textInput("items", "Items to reverse (e.g., item2, item5)", value = ""),
-                              numericInput("num_respuestas", "Number of Responses (e.g., 4)", value = NA, min = 0),
-                              checkboxInput("comienza_con_cero", "Starts with zero?", value = FALSE),
-                              actionButton("procesar", "Process Data")
+                              h4("Paso 1: Priors (por defecto)"),
+                              actionButton("show_priors", "Mostrar Priors")
                             ),
                             mainPanel(
-                              h4("Processed Data"),
-                              DT::dataTableOutput("tabla")
+                              verbatimTextOutput("priors_output")
                             )
                           )
                  ),
                  
-                 # 2. Null Model
-                 tabPanel("Null Model",
+                 # ----- Paso 2: Modelo -----
+                 tabPanel("Paso 2: Modelo",
                           sidebarLayout(
                             sidebarPanel(
-                              h4("Null Model Summary"),
-                              textInput("null_prefix", "Item Prefix (e.g., RSE)", value = ""),
-                              textInput("null_range", "Items (range or list) (e.g., 1:10)", value = ""),
-                              numericInput("null_n_chains", "Number of chains", value = 3, min = 1),
-                              numericInput("null_burnin", "Burnin", value = 1000, min = 0),
-                              numericInput("null_sample", "Samples", value = 1000, min = 1),
-                              numericInput("null_seed", "Seed", value = 2025, min = 0),
-                              actionButton("procesar_modelo_nulo", "Run Null Model")
+                              h4("Paso 2: Estimación del Modelo"),
+                              fileInput("datafile", "Subir archivo de datos (Excel)", accept = ".xlsx"),
+                              textInput("model_spec", "Especificación del modelo", value = ""),
+                              numericInput("n_chains", "Número de cadenas", value = 3, min = 1),
+                              numericInput("burnin", "Burn-in", value = 1000, min = 0),
+                              numericInput("sample", "Número de muestras", value = 1000, min = 100),
+                              numericInput("seed", "Seed", value = 12345, min = 1),
+                              # Inputs para crear el modelo nulo aparecen vacíos por defecto
+                              textInput("null_prefix", "Prefijo para create_null_model (e.g., RSE, NSI)", value = ""),
+                              textInput("null_range", "Rango de Items (e.g., 1:10)", value = ""),
+                              actionButton("run_model", "Ejecutar Modelo")
                             ),
                             mainPanel(
-                              verbatimTextOutput("modeloNulo")
+                              verbatimTextOutput("model_summary")
                             )
                           )
                  ),
                  
-                 # 3. Model Estimation
-                 tabPanel("Model Estimation",
+                 # ----- Paso 3: Trace Plot -----
+                 tabPanel("Paso 3: Trace Plot",
                           sidebarLayout(
                             sidebarPanel(
-                              h4("Model Parameters"),
-                              textAreaInput("modelo1", "Specify the model:", value = "", rows = 3),
-                              numericInput("n_chains", "Number of chains", value = 3, min = 1),
-                              numericInput("burnin", "Burnin", value = 1000, min = 0),
-                              numericInput("sample", "Samples", value = 1000, min = 1),
-                              numericInput("seed", "Seed", value = 2025, min = 0),
-                              actionButton("procesar_modelo1", "Run Model")
+                              h4("Paso 3: Trazas de las cadenas"),
+                              actionButton("plot_trace", "Generar Trace Plot"),
+                              downloadButton("downloadTracePlot", "Descargar Trace Plot")
                             ),
                             mainPanel(
-                              h4("Model Results"),
-                              verbatimTextOutput("modeloFactorUnico")
+                              plotOutput("trace_plot")
                             )
                           )
                  ),
                  
-                 # 4. Combined Summary
-                 tabPanel("Combined Summary",
+                 # ----- Paso 4: Convergencia Local -----
+                 tabPanel("Paso 4: Convergencia Local",
                           sidebarLayout(
                             sidebarPanel(
-                              h4("Combined Fit Summary"),
-                              downloadButton("downloadCombined", "Download Combined Summary")
+                              h4("Paso 4: Modelo con Iteraciones Duplicadas"),
+                              actionButton("run_long_model", "Ejecutar Modelo Largo")
                             ),
                             mainPanel(
-                              tableOutput("combinedModelTable")
+                              verbatimTextOutput("convergence_output")
                             )
                           )
                  ),
                  
-                 # 5. Preliminaries and Factor Results
-                 tabPanel("Preliminaries and Factor Results",
+                 # ----- Paso 5: Histograma Posterior -----
+                 tabPanel("Paso 5: Histograma Posterior",
                           sidebarLayout(
                             sidebarPanel(
-                              h4("Response Rates and Factor Results"),
-                              textInput("prelim_columns", "Columns (e.g., RSE1:RSE10)", value = ""),
-                              textInput("prelim_items", "Items (e.g., 1:10)", value = ""),
-                              textInput("prelim_responses", "Responses (e.g., 1,2,3,4)", value = ""),
-                              actionButton("run_prelim", "Run Analysis"),
-                              downloadButton("downloadPrelim", "Download Preliminaries Table")
+                              h4("Paso 5: Histograma del Posterior"),
+                              downloadButton("downloadPosteriorHist", "Descargar Histograma")
                             ),
                             mainPanel(
-                              tableOutput("prelimFactor")
+                              plotOutput("posterior_hist")
                             )
                           )
                  ),
                  
-                 # 6. MCMC Errors
-                 tabPanel("MCMC Errors",
+                 # ----- Paso 6: Diagnósticos MCMC -----
+                 tabPanel("Paso 6: Diagnósticos MCMC",
                           sidebarLayout(
                             sidebarPanel(
-                              h4("MCMC Errors")
+                              h4("Paso 6: Autocorrelación, neff y PSRF")
                             ),
                             mainPanel(
-                              verbatimTextOutput("errores")
+                              verbatimTextOutput("mcmc_diagnostics")
                             )
                           )
                  ),
                  
-                 # 7. Trace Plot
-                 tabPanel("Trace Plot",
+                 # ----- Paso 7: Intervalos Creíbles -----
+                 tabPanel("Paso 7: Intervalos Creíbles",
                           sidebarLayout(
                             sidebarPanel(
-                              h4("Trace Plot for Parameters"),
-                              downloadButton("downloadTracePlot", "Download Trace Plot")
+                              h4("Paso 7: Gráfico de Intervalos Creíbles"),
+                              actionButton("plot_intervals", "Generar Gráfico de Intervalos"),
+                              downloadButton("downloadIntervals", "Descargar Gráfico de Intervalos")
                             ),
                             mainPanel(
-                              plotOutput("Figura1")
+                              plotOutput("credible_intervals")
                             )
                           )
                  ),
                  
-                 # 8. Model Comparison
-                 tabPanel("Model Comparison",
+                 # ----- Paso 8: Sensibilidad de Priors -----
+                 tabPanel("Paso 8: Sensibilidad Priors",
                           sidebarLayout(
                             sidebarPanel(
-                              h4("Comparison between Models")
+                              h4("Paso 8: Modelo con Priors Custom"),
+                              textInput("dp_custom_input", "Priors Custom (dp_custom):", 
+                                        value = "lambda = 'normal(0.7,0.5)'"),
+                              actionButton("run_custom_model", "Ejecutar Modelo Custom")
                             ),
                             mainPanel(
-                              verbatimTextOutput("comparacion")
+                              verbatimTextOutput("sensitivity_output")
                             )
                           )
                  ),
                  
-                 # 9. Cómo citar
+                 # ----- Paso 9: Índices de Ajuste -----
+                 tabPanel("Paso 9: Índices de Ajuste",
+                          sidebarLayout(
+                            sidebarPanel(
+                              h4("Paso 9: Índices de Ajuste (Fit Indices)"),
+                              downloadButton("downloadBayesIndices", "Descargar Gráfico de Índices Bayesianos")
+                            ),
+                            mainPanel(
+                              verbatimTextOutput("fit_indices_output"),
+                              plotOutput("bayes_indices_plot")
+                            )
+                          )
+                 ),
+                 
+                 # ----- Paso 10: Informe Final -----
+                 tabPanel("Paso 10: Informe Final",
+                          sidebarLayout(
+                            sidebarPanel(
+                              h4("Paso 10: Informe Final"),
+                              downloadButton("download_report", "Descargar Informe Final")
+                            ),
+                            mainPanel(
+                              verbatimTextOutput("final_report")
+                            )
+                          )
+                 ),
+                 
+                 # ----- Nueva pestaña: How to cite -----
                  tabPanel("How to cite",
-                          h2("How to quote this Shiny"),
-                          tags$blockquote(
-                            "Ventura-León, J. (2025). ",
-                            em("BayesPsy"), 
-                            " [Aplicación Shiny]. https://github.com/jventural/BayesPsy_app"
-                          ),
-                          h3("References used to build the application:"),
-                          htmlOutput("bibReferences")
+                          fluidPage(
+                            h2("How to quote this Shiny"),
+                            tags$blockquote(
+                              "Ventura-León, J. (2025). ",
+                              em("BayesPsy"), 
+                              " [Aplicación Shiny]. https://github.com/jventural/BayesPsy_app"
+                            ),
+                            h3("References used to build the application:"),
+                            htmlOutput("bibReferences")
+                          )
                  )
 )
 
+# Definir el servidor
 server <- function(input, output, session) {
   
-  # 1. Data Upload and Preprocessing
-  datos <- reactive({
-    req(input$archivo)
-    read_excel(input$archivo$datapath)
+  # Variables reactivas para almacenar los resultados de los modelos
+  fit_default <- reactiveVal(NULL)
+  fit_long <- reactiveVal(NULL)
+  fit_custom <- reactiveVal(NULL)
+  null_model_fit <- reactiveVal(NULL)
+  
+  # ----- Paso 1: Mostrar priors por defecto -----
+  observeEvent(input$show_priors, {
+    priors_text <- capture.output(dpriors())
+    output$priors_output <- renderPrint({
+      cat(priors_text, sep = "\n")
+    })
   })
   
-  datos_invertidos <- eventReactive(input$procesar, {
-    data <- datos()
-    items_vector <- if(nchar(input$items) > 0) unlist(strsplit(input$items, split = ",\\s*")) else character(0)
-    df_new <- invertir_items(data,
-                             items = items_vector,
-                             num_respuestas = input$num_respuestas,
-                             comienza_con_cero = input$comienza_con_cero)
-    df_new
-  })
-  
-  output$tabla <- DT::renderDataTable({
-    req(datos_invertidos())
-    DT::datatable(datos_invertidos(), options = list(pageLength = 10))
-  })
-  
-  # 2. Null Model
-  modelo_nulo <- eventReactive(input$procesar_modelo_nulo, {
-    req(datos_invertidos())
-    data <- datos_invertidos()
-    req(input$null_prefix, input$null_range)
-    
-    withProgress(message = "Running Null Model...", value = 0, {
-      incProgress(0.2, detail = "Processing item range")
-      null_range <- tryCatch({
-        eval(parse(text = input$null_range))
-      }, error = function(e) {
-        NULL
+  # ----- Paso 2: Estimar el Modelo (con barra de progreso) -----
+  observeEvent(input$run_model, {
+    req(input$datafile)
+    withProgress(message = "Ejecutando Modelo", value = 0, {
+      incProgress(0.3, detail = "Cargando datos")
+      data <- read_excel(input$datafile$datapath)
+      incProgress(0.3, detail = "Ejecutando bcfa")
+      fit <- bcfa(input$model_spec, data = data, 
+                  n.chains = input$n_chains, 
+                  burnin = input$burnin, 
+                  sample = input$sample, 
+                  seed = input$seed)
+      incProgress(0.3, detail = "Procesando resultados")
+      fit_default(fit)
+      summ <- capture.output(summary(fit, standardized = TRUE))
+      output$model_summary <- renderPrint({
+        cat(summ, sep = "\n")
       })
-      validate(need(!is.null(null_range), "Invalid item range."))
-      
-      incProgress(0.3, detail = "Creating null model")
-      null_model <- create_null_model(input$null_prefix, null_range)
-      
-      incProgress(0.3, detail = "Fitting null model")
-      fit0 <- bcfa(null_model, data = data, 
-                   n.chains = input$null_n_chains, 
-                   burnin = input$null_burnin, 
-                   sample = input$null_sample, 
-                   seed = input$null_seed)
-      summary_fit0 <- capture.output(summary(fit0))
-      
-      incProgress(0.2, detail = "Calculating fit indices")
-      bnull <- blavFitIndices(fit0, baseline.model = fit0, rescale = "devM", pD = "dic")
-      
-      list(null_model = null_model, 
-           summary_fit0 = summary_fit0, 
-           bnull = bnull,
-           fit0 = fit0,
-           data = data)
+      incProgress(0.1)
     })
   })
   
-  output$modeloNulo <- renderPrint({
-    req(modelo_nulo())
-    cat("Null Model:\n")
-    cat(modelo_nulo()$null_model, sep = "\n")
-    cat("\n\nNull Model Fit Summary:\n")
-    cat(modelo_nulo()$summary_fit0, sep = "\n")
-    cat("\n\nFit Indices (Baseline Model):\n")
-    print(modelo_nulo()$bnull)
-  })
-  
-  # 3. Model Estimation
-  modelo_factor_unico <- eventReactive(input$procesar_modelo1, {
-    req(datos_invertidos(), modelo_nulo())
-    data <- datos_invertidos()
-    withProgress(message = "Running Model...", value = 0, {
-      incProgress(0.2, detail = "Fitting the model")
-      model1 <- input$modelo1
-      fit1 <- bcfa(model1, data = data, 
-                   n.chains = input$n_chains, 
-                   burnin = input$burnin, 
-                   sample = input$sample, 
-                   seed = input$seed)
-      
-      incProgress(0.4, detail = "Calculating model summary")
-      summary_fit1 <- capture.output(summary(fit1, standardized = TRUE))
-      
-      incProgress(0.2, detail = "Obtaining fit measures")
-      fitm1 <- fitMeasures(fit1)
-      
-      incProgress(0.1, detail = "Calculating additional indices")
-      bfit1 <- blavFitIndices(fit1, baseline.model = modelo_nulo()$fit0, 
-                              rescale = "devM", pD = "dic")
-      
-      incProgress(0.1, detail = "Finalizing")
-      list(model_spec = model1,
-           fit1 = fit1,
-           summary_fit1 = summary_fit1,
-           fitm1 = fitm1,
-           bfit1 = bfit1)
-    })
-  })
-  
-  output$modeloFactorUnico <- renderPrint({
-    req(modelo_factor_unico())
-    cat("Model Specification:\n")
-    cat(modelo_factor_unico()$model_spec, "\n\n")
-    cat("Model Fit Summary:\n")
-    cat(modelo_factor_unico()$summary_fit1, sep = "\n")
-    cat("\n\nFit Measures:\n")
-    print(modelo_factor_unico()$fitm1)
-    cat("\n\nAdditional Indices (compared with Null Model):\n")
-    print(modelo_factor_unico()$bfit1)
-  })
-  
-  # 4. Combined Summary
-  combined_summary <- reactive({
-    req(modelo_nulo(), modelo_factor_unico())
-    combined_model_summary <- BayesPsyMetrics::get_combined_Fit_Indices_Blavaan(
-      list(modelo_nulo()$bnull, modelo_factor_unico()$bfit1),
-      credMass = 0.95,
-      fits = c(modelo_nulo()$fit0, modelo_factor_unico()$fit1)
-    )
-    as.data.frame(combined_model_summary)
-  })
-  
-  output$combinedModelTable <- renderTable({
-    req(combined_summary())
-    combined_summary()
-  })
-  
-  output$downloadCombined <- downloadHandler(
-    filename = function() {
-      paste("Combined_Summary_", Sys.Date(), ".xlsx", sep = "")
-    },
-    content = function(file) {
-      openxlsx::write.xlsx(combined_summary(), file, row.names = FALSE)
-    }
-  )
-  
-  # 5. Preliminaries and Factor Results
-  result_prelim <- eventReactive(input$run_prelim, {
-    req(datos_invertidos(), modelo_factor_unico())
-    df <- datos_invertidos()
-    
-    # Selecciona las columnas ingresadas por el usuario (por ejemplo RSE1:RSE10)
-    numeric_df <- df %>% select(!!rlang::parse_expr(input$prelim_columns))
-    
-    # Convierte el texto de "Items (e.g., 1:10)" en un vector de items
-    items_vec <- tryCatch(eval(parse(text = input$prelim_items)), error = function(e) NULL)
-    validate(need(!is.null(items_vec), "Invalid items input."))
-    
-    # Convierte la cadena "1,2,3,4" en un vector de respuestas
-    responses_vec <- if(nchar(input$prelim_responses) > 0) strsplit(input$prelim_responses, ",\\s*")[[1]] else character(0)
-    
-    df_preliminar <- rates_responses(numeric_df,
-                                     items = items_vec,
-                                     responses = responses_vec)
-    
-    fit1_results <- get_factor_blavaan(modelo_factor_unico()$fit1)
-    combined_results <- bind_cols(df_preliminar, fit1_results)
-    combined_results
-  })
-  
-  output$prelimFactor <- renderTable({
-    req(result_prelim())
-    result_prelim()
-  })
-  
-  output$downloadPrelim <- downloadHandler(
-    filename = function() {
-      paste("Preliminaries_and_Factor_", Sys.Date(), ".xlsx", sep = "")
-    },
-    content = function(file) {
-      openxlsx::write.xlsx(result_prelim(), file, row.names = FALSE)
-    }
-  )
-  
-  # 6. MCMC Errors
-  errores_reactive <- reactive({
-    req(modelo_factor_unico())
-    calculate_mcmc_standard_error(modelo_factor_unico()$fit1)
-  })
-  
-  output$errores <- renderPrint({
-    req(errores_reactive())
-    print(errores_reactive())
-  })
-  
-  # 7. Trace Plot
-  output$Figura1 <- renderPlot({
-    req(modelo_factor_unico())
-    p <- plot(modelo_factor_unico()$fit1, pars = 1:5, plot.type = "trace") +
+  # ----- Paso 3: Trace Plot (con botón de descarga) -----
+  observeEvent(input$plot_trace, {
+    req(fit_default())
+    trace_plot <- plot(fit_default(), pars = 1:5, plot.type = "trace", showplot = FALSE) +
       scale_color_manual(values = RColorBrewer::brewer.pal(3, "Pastel1")) +
       theme_bw()
-    print(p)
+    output$trace_plot <- renderPlot({
+      trace_plot
+    })
   })
   
   output$downloadTracePlot <- downloadHandler(
     filename = function() {
-      paste("Trace_Plot_", Sys.Date(), ".png", sep = "")
+      paste("Trace_Plot_", Sys.Date(), ".jpg", sep = "")
     },
     content = function(file) {
-      req(modelo_factor_unico())
-      p <- plot(modelo_factor_unico()$fit1, pars = 1:5, plot.type = "trace") +
+      req(fit_default())
+      trace_plot <- plot(fit_default(), pars = 1:5, plot.type = "trace", showplot = FALSE) +
         scale_color_manual(values = RColorBrewer::brewer.pal(3, "Pastel1")) +
         theme_bw()
-      ggsave(file, plot = p, device = "png", dpi = 300, width = 8, height = 6)
+      ggsave(file, plot = trace_plot, device = "jpeg", dpi = 600, width = 8, height = 6)
     }
   )
   
-  # 8. Model Comparison
-  output$comparacion <- renderPrint({
-    req(modelo_factor_unico(), modelo_nulo())
-    bc01 <- blavCompare(modelo_factor_unico()$fit1, modelo_nulo()$fit0)
-    print(bc01)
+  # ----- Paso 4: Convergencia Local (Modelo Largo con iteraciones duplicadas) -----
+  observeEvent(input$run_long_model, {
+    req(input$datafile, fit_default())
+    withProgress(message = "Ejecutando Modelo Largo", value = 0, {
+      incProgress(0.3, detail = "Cargando datos")
+      data <- read_excel(input$datafile$datapath)
+      incProgress(0.3, detail = "Ejecutando bcfa (modelo largo)")
+      fit_long_model <- bcfa(input$model_spec, data = data, 
+                             n.chains = input$n_chains, 
+                             burnin = input$burnin * 2, 
+                             sample = input$sample * 2, 
+                             seed = input$seed)
+      incProgress(0.3, detail = "Comparando coeficientes")
+      fit_long(fit_long_model)
+      coef_diff <- coef(fit_long_model) - coef(fit_default())
+      output$convergence_output <- renderPrint({
+        cat("Diferencias en coeficientes (Modelo Largo - Modelo por Defecto):\n")
+        print(coef_diff)
+      })
+      incProgress(0.1)
+    })
   })
   
-  # 9. Cómo citar: Mostrar las referencias en HTML
+  # ----- Paso 5: Histograma del Posterior (con botón de descarga) -----
+  output$posterior_hist <- renderPlot({
+    req(fit_default())
+    BayesPsyMetrics::plot_bhist_loadings(fit_default())
+  })
+  
+  output$downloadPosteriorHist <- downloadHandler(
+    filename = function() {
+      paste("Histograma_Posterior_", Sys.Date(), ".jpg", sep = "")
+    },
+    content = function(file) {
+      req(fit_default())
+      p <- BayesPsyMetrics::plot_bhist_loadings(fit_default())
+      ggsave(file, plot = p, device = "jpeg", dpi = 600, width = 8, height = 6)
+    }
+  )
+  
+  # ----- Paso 6: Diagnósticos MCMC -----
+  output$mcmc_diagnostics <- renderPrint({
+    req(fit_default())
+    ac10 <- compute_acf_lag10(fit_default())
+    neff <- blavInspect(fit_default(), "neff")
+    psrf <- blavInspect(fit_default(), "psrf")
+    stats <- BayesPsyMetrics::aditional_stat(ac10, neff, psrf)
+    cat("Autocorrelación (lag 10):\n")
+    print(ac10)
+    cat("\nTamaño Efectivo de la Muestra (neff):\n")
+    print(neff)
+    cat("\nPSRF:\n")
+    print(psrf)
+    cat("\nResumen de estadísticas adicionales:\n")
+    print(stats$summary)
+  })
+  
+  # ----- Paso 7: Intervalos Creíbles -----
+  observeEvent(input$plot_intervals, {
+    req(fit_default())
+    plot_IC <- BayesPsyMetrics::plot_binterval_loadings(fit_default(), labels = TRUE)
+    output$credible_intervals <- renderPlot({
+      plot_IC
+    })
+  })
+  
+  output$downloadIntervals <- downloadHandler(
+    filename = function() {
+      paste("Intervalos_Creibles_", Sys.Date(), ".jpg", sep = "")
+    },
+    content = function(file) {
+      req(fit_default())
+      p <- BayesPsyMetrics::plot_binterval_loadings(fit_default(), labels = TRUE)
+      ggsave(file, plot = p, device = "jpeg", dpi = 600, width = 8, height = 6)
+    }
+  )
+  
+  # ----- Paso 8: Sensibilidad de Priors -----
+  observeEvent(input$run_custom_model, {
+    req(input$datafile, fit_default(), input$dp_custom_input)
+    withProgress(message = "Ejecutando Modelo con Priors Custom", value = 0, {
+      incProgress(0.3, detail = "Cargando datos")
+      data <- read_excel(input$datafile$datapath)
+      incProgress(0.3, detail = "Evaluando dp_custom")
+      dp_custom <- eval(parse(text = paste0("dpriors(", input$dp_custom_input, ")")))
+      incProgress(0.3, detail = "Ejecutando bcfa con dp_custom")
+      fit_custom_model <- bcfa(input$model_spec, data = data, 
+                               dp = dp_custom,
+                               n.chains = input$n_chains, 
+                               burnin = input$burnin, 
+                               sample = input$sample, 
+                               seed = input$seed)
+      incProgress(0.3, detail = "Comparando coeficientes")
+      fit_custom(fit_custom_model)
+      coef_diff_custom <- coef(fit_custom_model) - coef(fit_default())
+      output$sensitivity_output <- renderPrint({
+        cat("Diferencias en coeficientes (Modelo con Priors Custom - Modelo por Defecto):\n")
+        print(coef_diff_custom)
+      })
+      incProgress(0.1)
+    })
+  })
+  
+  # ----- Paso 9: Índices de Ajuste -----
+  observe({
+    req(input$datafile, fit_default(), input$null_prefix, input$null_range)
+    withProgress(message = "Calculando Índices de Ajuste", value = 0, {
+      incProgress(0.3, detail = "Cargando datos")
+      data <- read_excel(input$datafile$datapath)
+      incProgress(0.3, detail = "Ajustando modelo nulo")
+      null_range <- eval(parse(text = input$null_range))
+      null_model <- create_null_model(input$null_prefix, null_range)
+      fit_null <- bcfa(null_model, data = data, 
+                       n.chains = input$n_chains, 
+                       burnin = input$burnin, 
+                       sample = input$sample, 
+                       seed = input$seed)
+      incProgress(0.2, detail = "Calculando fit indices")
+      null_model_fit(fit_null)
+      bfit1 <- blavFitIndices(fit_default(), baseline.model = fit_null, 
+                              rescale = "devM", pD = "dic")
+      output$fit_indices_output <- renderPrint({
+        cat("Índices de ajuste (comparados con el modelo nulo):\n")
+        print(bfit1)
+      })
+      output$bayes_indices_plot <- renderPlot({
+        BayesPsyMetrics::plot_bayes_indices(bfit1)
+      })
+      incProgress(0.1)
+    })
+  })
+  
+  output$downloadBayesIndices <- downloadHandler(
+    filename = function() {
+      paste("Bayes_Indices_", Sys.Date(), ".jpg", sep = "")
+    },
+    content = function(file) {
+      req(fit_default())
+      data <- read_excel(input$datafile$datapath)
+      null_range <- eval(parse(text = input$null_range))
+      null_model <- create_null_model(input$null_prefix, null_range)
+      fit_null <- bcfa(null_model, data = data, 
+                       n.chains = input$n_chains, 
+                       burnin = input$burnin, 
+                       sample = input$sample, 
+                       seed = input$seed)
+      bfit1 <- blavFitIndices(fit_default(), baseline.model = fit_null, 
+                              rescale = "devM", pD = "dic")
+      p <- BayesPsyMetrics::plot_bayes_indices(bfit1)
+      ggsave(file, plot = p, device = "jpeg", dpi = 600, width = 8, height = 6)
+    }
+  )
+  
+  # ----- Paso 10: Informe Final -----
+  output$final_report <- renderPrint({
+    req(fit_default(), null_model_fit())
+    final_results <- list(
+      "Resumen Modelo por Defecto" = summary(fit_default(), standardized = TRUE),
+      "Modelo con Iteraciones Duplicadas" = if (!is.null(fit_long())) summary(fit_long(), standardized = TRUE) else "No ejecutado",
+      "Sensibilidad (Diferencia coeficientes)" = if (!is.null(fit_custom())) coef(fit_custom()) - coef(fit_default()) else "No ejecutado",
+      "Índices de Ajuste" = blavFitIndices(fit_default(), baseline.model = null_model_fit(), rescale = "devM", pD = "dic")
+    )
+    print(final_results)
+  })
+  
+  output$download_report <- downloadHandler(
+    filename = function() {
+      paste("Informe_Final_", Sys.Date(), ".xlsx", sep = "")
+    },
+    content = function(file) {
+      req(fit_default(), null_model_fit())
+      final_results <- list(
+        "Resumen_Modelo" = as.data.frame(summary(fit_default(), standardized = TRUE)$PE),
+        "Sensibilidad" = as.data.frame(if (!is.null(fit_custom())) coef(fit_custom()) - coef(fit_default()) else NA),
+        "Índices_Ajuste" = as.data.frame(blavFitIndices(fit_default(), baseline.model = null_model_fit(), rescale = "devM", pD = "dic"))
+      )
+      openxlsx::write.xlsx(final_results, file)
+    }
+  )
+  
+  # ----- Nueva pestaña: How to cite -----
   output$bibReferences <- renderUI({
     HTML(convert_bib_to_html(bibs))
   })
 }
 
+# Ejecutar la aplicación Shiny
 shinyApp(ui, server)
